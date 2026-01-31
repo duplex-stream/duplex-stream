@@ -1,1 +1,1 @@
-export * from './extraction.js'
+export * from './extraction'

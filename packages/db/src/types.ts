@@ -1,5 +1,5 @@
 import type { InferSelectModel, InferInsertModel } from 'drizzle-orm'
-import * as schema from './schema/index.js'
+import * as schema from './schema/index'
 
 // Base types from schema
 export type Conversation = InferSelectModel<typeof schema.conversations>
