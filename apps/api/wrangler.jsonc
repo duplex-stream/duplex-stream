@@ -1,0 +1,32 @@
+{
+	"$schema": "node_modules/wrangler/config-schema.json",
+	"name": "api",
+	"main": "src/index.ts",
+	"compatibility_date": "2025-01-15",
+	"compatibility_flags": ["nodejs_compat"],
+	"observability": {
+		"logs": {
+			"enabled": true
+		}
+	},
+	"ai": {
+		"binding": "AI"
+	},
+	"d1_databases": [
+		{
+			"binding": "DB",
+			"database_name": "duplex-dev",
+			"database_id": "local"
+		}
+	],
+	"workflows": [
+		{
+			"name": "extract-conversation",
+			"binding": "EXTRACT_WORKFLOW",
+			"class_name": "ExtractConversationWorkflow"
+		}
+	],
+	"vars": {
+		"ENVIRONMENT": "development"
+	}
+}
