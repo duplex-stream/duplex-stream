@@ -26,3 +26,5 @@ app.route('/decisions', decisionsRoutes)
 app.route('/extraction', extractionRoutes)
 
 export default app
+
+export { ExtractConversationWorkflow } from './workflows/extract-conversation'
