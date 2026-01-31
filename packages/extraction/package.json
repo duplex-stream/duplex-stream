@@ -1,0 +1,20 @@
+{
+	"name": "@repo/extraction",
+	"version": "0.1.0",
+	"private": true,
+	"type": "module",
+	"exports": {
+		".": "./src/index.ts",
+		"./parsers": "./src/parsers/index.ts",
+		"./prompts": "./src/prompts/index.ts"
+	},
+	"dependencies": {
+		"@ai-sdk/anthropic": "^1.0.0",
+		"ai": "^4.0.0",
+		"zod": "3.24.3"
+	},
+	"devDependencies": {
+		"@repo/typescript-config": "workspace:*",
+		"typescript": "5.8.2"
+	}
+}
