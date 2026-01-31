@@ -3,6 +3,7 @@ import { drizzle } from 'drizzle-orm/d1'
 import * as schema from '@repo/db/schema'
 import type { HonoEnv } from './context'
 import decisionsRoutes from './routes/decisions'
+import extractionRoutes from './routes/extraction'
 
 const app = new Hono<HonoEnv>()
 
@@ -22,5 +23,6 @@ app.get('/', (c) => {
 
 // Routes
 app.route('/decisions', decisionsRoutes)
+app.route('/extraction', extractionRoutes)
 
 export default app
