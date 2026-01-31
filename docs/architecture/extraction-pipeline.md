@@ -89,7 +89,7 @@ export const conversations = sqliteTable('conversations', {
   source: text('source', {
     enum: ['claude-code', 'claude-web', 'cursor', 'other']
   }).notNull(),
-  sourceFile: text('source_file').notNull(),
+  sourcePath: text('source_path').notNull(),
   projectPath: text('project_path').notNull(),
   sessionId: text('session_id'),                // Original session ID
   messageCount: integer('message_count').notNull(),
@@ -246,7 +246,7 @@ export type ConversationWithRelations = Conversation & {
 
 ### Stack
 
-- **Model**: Claude Sonnet 4.5 (`claude-sonnet-4-5-20250514`)
+- **Model**: Claude Sonnet 4.5 (`claude-sonnet-4-5-20250929`)
 - **Gateway**: Cloudflare AI Gateway (logging, caching, rate limiting)
 - **SDK**: Vercel AI SDK (streaming, structured output)
 
@@ -255,16 +255,28 @@ export type ConversationWithRelations = Conversation & {
 ```typescript
 // packages/extraction/src/ai.ts
 import { createAnthropic } from '@ai-sdk/anthropic'
-import { generateObject } from 'ai'
 
-// AI Gateway base URL pattern:
-// https://gateway.ai.cloudflare.com/v1/{account_id}/{gateway_id}/anthropic
+// Uses Cloudflare AI binding for gateway URL resolution
+// Requires AI binding in wrangler.jsonc: { "ai": { "binding": "AI" } }
 
-export function createExtractionClient(env: Env) {
+export async function createExtractionClient(env: Env) {
+  const baseURL = await env.AI.gateway('duplex-extraction').getUrl('anthropic')
+
   return createAnthropic({
     apiKey: env.ANTHROPIC_API_KEY,
-    baseURL: `https://gateway.ai.cloudflare.com/v1/${env.CF_ACCOUNT_ID}/duplex-extraction/anthropic`,
+    baseURL,
   })
+}
+```
+
+### Wrangler AI Binding
+
+```jsonc
+// apps/api/wrangler.jsonc
+{
+  "ai": {
+    "binding": "AI"
+  }
 }
 ```
 
@@ -296,7 +308,7 @@ async function identifyDecisions(
   transcript: string
 ): Promise<z.infer<typeof IdentificationResponseSchema>> {
   const { object } = await generateObject({
-    model: client('claude-sonnet-4-5-20250514'),
+    model: client('claude-sonnet-4-5-20250929'),
     schema: IdentificationResponseSchema,
     prompt: buildIdentificationPrompt(transcript),
   })
@@ -323,7 +335,7 @@ async function extractDecision(
   otherCandidates: DecisionCandidate[]
 ): Promise<z.infer<typeof ExtractedDecisionSchema>> {
   const { object } = await generateObject({
-    model: client('claude-sonnet-4-5-20250514'),
+    model: client('claude-sonnet-4-5-20250929'),
     schema: ExtractedDecisionSchema,
     prompt: buildExtractionPrompt(candidate, contextMessages, otherCandidates),
   })
@@ -466,7 +478,10 @@ import { generateObject } from 'ai'
 interface ExtractConversationParams {
   orgId: string
   workspaceId: string
-  sourceFile: string
+  /** File content as string (file reading happens outside workflow) */
+  content: string
+  /** Original file path for metadata extraction */
+  sourcePath: string
   source: 'claude-code' | 'claude-web' | 'cursor' | 'other'
 }
 
@@ -485,14 +500,14 @@ export class ExtractConversationWorkflow extends WorkflowEntrypoint<
     event: WorkflowEvent<ExtractConversationParams>,
     step: WorkflowStep
   ): Promise<ExtractConversationResult> {
-    const { orgId, workspaceId, sourceFile, source } = event.payload
-    const client = createExtractionClient(this.env)
+    const { orgId, workspaceId, content, sourcePath, source } = event.payload
+    const client = await createExtractionClient(this.env)
 
-    // Step 1: Parse source file into messages
-    const conversation = await step.do('parse-source-file', async () => {
+    // Step 1: Parse content into messages
+    const conversation = await step.do('parse-content', async () => {
       switch (source) {
         case 'claude-code':
-          return parseClaudeCodeSession(sourceFile)
+          return parseClaudeCodeSession(content, { sourcePath })
         case 'claude-web':
           // TODO: Implement
           throw new Error('Claude web parser not implemented')
@@ -509,7 +524,7 @@ export class ExtractConversationWorkflow extends WorkflowEntrypoint<
     // Step 3: Identify decisions (Phase 1 LLM)
     const candidates = await step.do('identify-decisions', async () => {
       const { object } = await generateObject({
-        model: client('claude-sonnet-4-5-20250514'),
+        model: client('claude-sonnet-4-5-20250929'),
         schema: IdentificationResponseSchema,
         prompt: buildIdentificationPrompt(transcript),
       })
@@ -529,7 +544,7 @@ export class ExtractConversationWorkflow extends WorkflowEntrypoint<
         )
 
         const { object } = await generateObject({
-          model: client('claude-sonnet-4-5-20250514'),
+          model: client('claude-sonnet-4-5-20250929'),
           schema: ExtractedDecisionSchema,
           prompt: buildExtractionPrompt(candidate, contextMessages, candidates),
         })
@@ -570,7 +585,7 @@ export class ExtractConversationWorkflow extends WorkflowEntrypoint<
         orgId,
         workspaceId,
         source,
-        sourceFile,
+        sourcePath,
         conversation,
         decisions: resolved,
       })
@@ -603,10 +618,18 @@ export class ExtractConversationWorkflow extends WorkflowEntrypoint<
 
 ## Parsers
 
+### Design Note: File Reading Outside Workers
+
+Parsers accept file **content** as a string, not file paths. File reading happens outside Workers:
+- **Dev/testing**: CLI script reads files locally, calls extraction API with content
+- **Production**: Files uploaded to R2, workflow reads from R2
+
+This avoids Node.js `fs` in Workers runtime.
+
 ### Claude Code Parser (`packages/extraction/src/parsers/claude-code.ts`)
 
 ```typescript
-import { readFile } from 'fs/promises'
+// Parser accepts content string - file reading happens outside Workers
 
 interface ClaudeCodeEvent {
   type: string
@@ -618,7 +641,7 @@ interface ClaudeCodeEvent {
   sessionId?: string
 }
 
-interface ParsedMessage {
+export interface ParsedMessage {
   index: number
   role: 'user' | 'assistant' | 'system'
   content: string
@@ -626,15 +649,27 @@ interface ParsedMessage {
   timestamp?: Date
 }
 
-interface ParsedConversation {
+export interface ParsedConversation {
   sessionId: string
   projectPath: string
   messages: ParsedMessage[]
   createdAt: Date
 }
 
-export async function parseClaudeCodeSession(filePath: string): Promise<ParsedConversation> {
-  const content = await readFile(filePath, 'utf-8')
+export interface ParseOptions {
+  /** Original file path (for metadata extraction, not file reading) */
+  sourcePath?: string
+}
+
+/**
+ * Parse Claude Code session JSONL content into structured conversation.
+ * @param content - JSONL file content as string
+ * @param options - Optional metadata like original file path
+ */
+export function parseClaudeCodeSession(
+  content: string,
+  options: ParseOptions = {}
+): ParsedConversation {
   const lines = content.trim().split('\n')
 
   const messages: ParsedMessage[] = []
@@ -717,13 +752,15 @@ export async function parseClaudeCodeSession(filePath: string): Promise<ParsedCo
     }
   }
 
-  // Extract project path from file path
+  // Extract project path from source path if provided
   // ~/.claude/projects/-Users-asnodgrass-lil-duplex-stream-duplex-stream/session.jsonl
-  const match = filePath.match(/projects\/([^/]+)\//)
-  if (match) {
-    projectPath = match[1].replace(/-/g, '/')
-    if (projectPath.startsWith('/')) {
-      projectPath = projectPath.slice(1)
+  if (options.sourcePath) {
+    const match = options.sourcePath.match(/projects\/([^/]+)\//)
+    if (match) {
+      projectPath = match[1].replace(/-/g, '/')
+      if (projectPath.startsWith('/')) {
+        projectPath = projectPath.slice(1)
+      }
     }
   }
 
@@ -985,16 +1022,17 @@ const app = new Hono<HonoEnv>()
 app.post(
   '/conversations/extract',
   zValidator('json', z.object({
-    sourceFile: z.string(),
+    content: z.string(),           // File content (reading happens client-side)
+    sourcePath: z.string(),        // Original file path for metadata
     source: z.enum(['claude-code', 'claude-web', 'cursor', 'other']),
     workspaceId: z.string(),
   })),
   async (c) => {
-    const { sourceFile, source, workspaceId } = c.req.valid('json')
+    const { content, sourcePath, source, workspaceId } = c.req.valid('json')
     const orgId = c.get('orgId')
 
     const instance = await c.env.EXTRACT_WORKFLOW.create({
-      params: { orgId, workspaceId, sourceFile, source }
+      params: { orgId, workspaceId, content, sourcePath, source }
     })
 
     return c.json({
