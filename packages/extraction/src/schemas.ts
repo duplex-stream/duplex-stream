@@ -11,7 +11,7 @@ export const DecisionCandidateSchema = z.object({
 	tempId: z.string(),
 	title: z.string(),
 	appearances: z.array(DecisionAppearanceSchema),
-	confidence: z.number().min(0).max(1),
+	confidence: z.number(), // 0-1 range, validated in prompts
 })
 
 export const IdentificationResponseSchema = z.object({
@@ -30,7 +30,7 @@ export const ExtractedDecisionSchema = z.object({
 	alternativesConsidered: z.array(AlternativeSchema),
 	status: z.enum(['active', 'superseded', 'tentative']),
 	dependsOn: z.array(z.string()),
-	confidence: z.number().min(0).max(1),
+	confidence: z.number(), // 0-1 range, validated in prompts
 })
 
 // Inferred types

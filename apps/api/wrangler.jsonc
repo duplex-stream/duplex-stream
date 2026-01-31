@@ -16,7 +16,8 @@
 		{
 			"binding": "DB",
 			"database_name": "duplex-dev",
-			"database_id": "local"
+			"database_id": "5663dc43-3a0a-4b5b-b8dc-bcec81d99978",
+			"migrations_dir": "../../packages/db/drizzle"
 		}
 	],
 	"workflows": [

@@ -5,7 +5,7 @@ export interface Env {
 	DB: D1Database
 	AI: Ai
 	EXTRACT_WORKFLOW: Workflow
-	ANTHROPIC_API_KEY: string
+	ANTHROPIC_API_KEY?: string // Optional when using AI Gateway provider tokens
 	ENVIRONMENT: string
 }
 

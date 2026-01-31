@@ -44,13 +44,10 @@ export class ExtractConversationWorkflow extends WorkflowEntrypoint<
 	): Promise<ExtractConversationResult> {
 		const { orgId, workspaceId, content, sourcePath, source } = event.payload
 
-		// Create AI client
-		const baseURL = await this.env.AI.gateway('duplex-extraction').getUrl(
-			'anthropic'
-		)
+		// Create AI client - using direct Anthropic API for now
+		// TODO: Re-enable AI Gateway once auth is working
 		const client = createAnthropic({
-			apiKey: this.env.ANTHROPIC_API_KEY,
-			baseURL,
+			apiKey: this.env.ANTHROPIC_API_KEY!,
 		})
 
 		// Step 1: Parse content
