@@ -23,7 +23,8 @@ import type { Env } from '../context'
 interface ExtractConversationParams {
 	orgId: string
 	workspaceId: string
-	content: string
+	content: string | null // Inline content (for small payloads)
+	r2Key: string | null // R2 object key (for large payloads)
 	sourcePath: string
 	source: 'claude-code' | 'claude-web' | 'cursor' | 'other'
 }
@@ -42,7 +43,26 @@ export class ExtractConversationWorkflow extends WorkflowEntrypoint<
 		event: WorkflowEvent<ExtractConversationParams>,
 		step: WorkflowStep
 	): Promise<ExtractConversationResult> {
-		const { orgId, workspaceId, content, sourcePath, source } = event.payload
+		const { orgId, workspaceId, sourcePath, source, r2Key } = event.payload
+
+		// Step 0: Fetch content (from inline or R2)
+		const content = await step.do('fetch-content', async () => {
+			// If inline content provided, use it directly
+			if (event.payload.content) {
+				return event.payload.content
+			}
+
+			// Otherwise, fetch from R2
+			if (r2Key) {
+				const object = await this.env.CONVERSATIONS_BUCKET.get(r2Key)
+				if (!object) {
+					throw new Error(`R2 object not found: ${r2Key}`)
+				}
+				return await object.text()
+			}
+
+			throw new Error('Either content or r2Key must be provided')
+		})
 
 		// Create AI client using Cloudflare AI Gateway
 		// The gateway proxies to Anthropic and provides caching/analytics
@@ -212,6 +232,15 @@ export class ExtractConversationWorkflow extends WorkflowEntrypoint<
 
 			return { conversationId }
 		})
+
+		// Final step: Cleanup R2 object if it was used
+		if (r2Key) {
+			const bucket = this.env.CONVERSATIONS_BUCKET
+			await step.do('cleanup-r2', async () => {
+				await bucket.delete(r2Key)
+				return { deleted: r2Key }
+			})
+		}
 
 		return {
 			conversationId: result.conversationId,

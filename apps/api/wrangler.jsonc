@@ -27,12 +27,19 @@
 			"class_name": "ExtractConversationWorkflow"
 		}
 	],
+	"r2_buckets": [
+		{
+			"binding": "CONVERSATIONS_BUCKET",
+			"bucket_name": "duplex-conversations"
+		}
+	],
 	"vars": {
 		"ENVIRONMENT": "development",
 		"WORKOS_CLIENT_ID": "", // Set via .dev.vars
 		"CF_ACCOUNT_ID": "", // Set via .dev.vars
 		"AI_GATEWAY_NAME": "duplex-extraction",
-		"CF_AIG_TOKEN": "" // Optional: AI Gateway auth token (if gateway requires auth)
+		"CF_AIG_TOKEN": "", // Optional: AI Gateway auth token (if gateway requires auth)
+		"R2_BUCKET_NAME": "duplex-conversations"
 	}
 	// Required in .dev.vars: ANTHROPIC_API_KEY
 }

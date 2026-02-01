@@ -11,6 +11,9 @@ use crate::db::{Database, SyncState, SyncStatus};
 use crate::parsers::{Conversation, ConversationParser, ParserRegistry};
 use crate::watcher::FileChangeEvent;
 
+/// Threshold for inline uploads vs R2 uploads (512KB)
+const INLINE_THRESHOLD: usize = 512 * 1024;
+
 #[derive(Error, Debug)]
 pub enum SyncError {
     #[error("Database error: {0}")]
@@ -47,6 +50,14 @@ pub struct SyncItem {
 pub struct ExtractionResponse {
     pub workflow_id: String,
     pub status: String,
+}
+
+/// Response from the upload-url API
+#[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UploadUrlResponse {
+    pub upload_url: String,
+    pub r2_key: String,
 }
 
 /// Engine that manages syncing conversations to the API
@@ -198,7 +209,25 @@ impl SyncEngine {
     }
 
     /// Upload a conversation to the API
+    /// Routes to R2 for large files or inline for smaller ones
     async fn upload_conversation(
+        &self,
+        conversation: &Conversation,
+    ) -> Result<ExtractionResponse, SyncError> {
+        // Check content size to determine upload method
+        if conversation.content.len() > INLINE_THRESHOLD {
+            tracing::info!(
+                "Content size {} exceeds threshold, using R2 upload",
+                conversation.content.len()
+            );
+            self.upload_via_r2(conversation).await
+        } else {
+            self.upload_inline(conversation).await
+        }
+    }
+
+    /// Upload conversation content inline (for small payloads)
+    async fn upload_inline(
         &self,
         conversation: &Conversation,
     ) -> Result<ExtractionResponse, SyncError> {
@@ -233,6 +262,101 @@ impl SyncEngine {
         }
 
         let extraction_response: ExtractionResponse = response.json().await?;
+        Ok(extraction_response)
+    }
+
+    /// Upload conversation via R2 (for large payloads)
+    async fn upload_via_r2(
+        &self,
+        conversation: &Conversation,
+    ) -> Result<ExtractionResponse, SyncError> {
+        // Get token for authenticated requests
+        let token = match self.get_token().await? {
+            Some(t) => t,
+            None => return Err(SyncError::NotAuthenticated),
+        };
+
+        // Step 1: Get presigned upload URL from API
+        let upload_url_endpoint = format!("{}/extraction/upload-url", self.api_url);
+        let filename = conversation
+            .source_path
+            .file_name()
+            .map(|s| s.to_string_lossy().to_string())
+            .unwrap_or_else(|| "conversation".to_string());
+        let content_hash = compute_hash(&conversation.content);
+
+        let upload_url_response = self
+            .client
+            .post(&upload_url_endpoint)
+            .bearer_auth(&token)
+            .json(&serde_json::json!({
+                "filename": filename,
+                "contentHash": content_hash,
+                "source": conversation.source,
+                "workspaceId": "default",
+            }))
+            .send()
+            .await?;
+
+        if !upload_url_response.status().is_success() {
+            let status = upload_url_response.status();
+            let body = upload_url_response.text().await.unwrap_or_default();
+            if status.as_u16() == 401 {
+                return Err(SyncError::NotAuthenticated);
+            }
+            return Err(SyncError::Api(format!(
+                "Failed to get upload URL: {}: {}",
+                status, body
+            )));
+        }
+
+        let upload_info: UploadUrlResponse = upload_url_response.json().await?;
+        tracing::debug!("Got presigned URL for R2 key: {}", upload_info.r2_key);
+
+        // Step 2: Upload content directly to R2 via presigned URL
+        let r2_response = self
+            .client
+            .put(&upload_info.upload_url)
+            .body(conversation.content.clone())
+            .send()
+            .await?;
+
+        if !r2_response.status().is_success() {
+            let status = r2_response.status();
+            let body = r2_response.text().await.unwrap_or_default();
+            return Err(SyncError::Api(format!(
+                "Failed to upload to R2: {}: {}",
+                status, body
+            )));
+        }
+
+        tracing::debug!("Uploaded content to R2");
+
+        // Step 3: Trigger extraction with R2 key
+        let extract_url = format!("{}/extraction/conversations/extract", self.api_url);
+        let extract_response = self
+            .client
+            .post(&extract_url)
+            .bearer_auth(&token)
+            .json(&serde_json::json!({
+                "r2Key": upload_info.r2_key,
+                "sourcePath": conversation.source_path.to_string_lossy(),
+                "source": conversation.source,
+                "workspaceId": "default",
+            }))
+            .send()
+            .await?;
+
+        if !extract_response.status().is_success() {
+            let status = extract_response.status();
+            let body = extract_response.text().await.unwrap_or_default();
+            if status.as_u16() == 401 {
+                return Err(SyncError::NotAuthenticated);
+            }
+            return Err(SyncError::Api(format!("{}: {}", status, body)));
+        }
+
+        let extraction_response: ExtractionResponse = extract_response.json().await?;
         Ok(extraction_response)
     }
 
