@@ -1,13 +1,16 @@
 //! WorkOS authentication module
 //!
-//! Implements the device code flow for CLI authentication via WorkOS AuthKit.
+//! Implements authentication flows for CLI and desktop via WorkOS AuthKit:
+//! - Device code flow for CLI authentication
+//! - PKCE OAuth flow for desktop authentication
 
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 use thiserror::Error;
 
-use crate::config::{save_credentials, Credentials};
+use crate::config::{save_credentials, Credentials, SecureTokenStorage};
+use crate::oauth::{LoopbackServer, OAuthError, PkceChallenge};
 
 /// WorkOS API base URL
 const WORKOS_API_URL: &str = "https://api.workos.com";
@@ -33,6 +36,10 @@ pub enum AuthError {
     Config(#[from] crate::config::ConfigError),
     #[error("WorkOS client ID not configured")]
     ClientIdNotConfigured,
+    #[error("OAuth error: {0}")]
+    OAuth(#[from] OAuthError),
+    #[error("OAuth flow not started")]
+    OAuthNotStarted,
 }
 
 /// Response from the device authorization endpoint
@@ -338,4 +345,193 @@ pub async fn get_valid_token() -> Result<String, AuthError> {
         }
         Err(e) => Err(AuthError::Config(e)),
     }
+}
+
+// ============================================================================
+// Desktop OAuth Flow (PKCE)
+// ============================================================================
+
+/// Desktop OAuth flow using PKCE and loopback server
+///
+/// This implements a secure OAuth 2.0 Authorization Code flow with PKCE,
+/// using a local loopback server to receive the callback.
+pub struct DesktopOAuthFlow {
+    /// PKCE challenge for this flow
+    pkce: PkceChallenge,
+    /// Loopback server for receiving the callback
+    server: Option<LoopbackServer>,
+    /// The authorization URL to open in the browser
+    auth_url: Option<String>,
+    /// Secure token storage
+    storage: SecureTokenStorage,
+}
+
+impl DesktopOAuthFlow {
+    /// Create a new desktop OAuth flow
+    pub fn new() -> Self {
+        Self {
+            pkce: PkceChallenge::generate(),
+            server: None,
+            auth_url: None,
+            storage: SecureTokenStorage::new(),
+        }
+    }
+
+    /// Start the OAuth flow
+    ///
+    /// This starts the loopback server and generates the authorization URL.
+    /// Call `get_auth_url()` to get the URL to open in the browser.
+    pub async fn start(&mut self) -> Result<(), AuthError> {
+        let client_id = get_client_id()?;
+
+        // Start the loopback server
+        let server = LoopbackServer::start().await?;
+        let redirect_uri = server.redirect_uri();
+
+        // Build the authorization URL
+        // WorkOS uses /user_management/authorize for OAuth flows
+        let auth_url = format!(
+            "{}/user_management/authorize?client_id={}&redirect_uri={}&response_type=code&code_challenge={}&code_challenge_method=S256",
+            WORKOS_API_URL,
+            urlencoding::encode(&client_id),
+            urlencoding::encode(&redirect_uri),
+            urlencoding::encode(&self.pkce.challenge),
+        );
+
+        self.auth_url = Some(auth_url);
+        self.server = Some(server);
+
+        tracing::info!("OAuth flow started, waiting for callback on loopback server");
+        Ok(())
+    }
+
+    /// Get the authorization URL to open in the browser
+    pub fn get_auth_url(&self) -> Option<&str> {
+        self.auth_url.as_deref()
+    }
+
+    /// Complete the OAuth flow
+    ///
+    /// This waits for the callback, exchanges the code for tokens,
+    /// and stores them in the keyring.
+    pub async fn complete(self) -> Result<TokenResponse, AuthError> {
+        let server = self.server.ok_or(AuthError::OAuthNotStarted)?;
+
+        // Wait for the callback
+        let callback = server.wait_for_callback().await?;
+        tracing::info!("Received authorization code from callback");
+
+        // Exchange the code for tokens
+        let client_id = get_client_id()?;
+        let token = exchange_code_for_token(
+            &client_id,
+            &callback.code,
+            &self.pkce.verifier,
+        ).await?;
+
+        // Store tokens in keyring
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        let expires_at = now + token.expires_in;
+
+        self.storage.store_tokens(
+            token.access_token.clone(),
+            token.refresh_token.clone(),
+            expires_at,
+        )?;
+
+        tracing::info!("OAuth flow completed successfully");
+        Ok(token)
+    }
+}
+
+impl Default for DesktopOAuthFlow {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// Exchange an authorization code for tokens using PKCE
+async fn exchange_code_for_token(
+    client_id: &str,
+    code: &str,
+    code_verifier: &str,
+) -> Result<TokenResponse, AuthError> {
+    let client = Client::new();
+
+    let response = client
+        .post(format!("{}/user_management/authenticate", WORKOS_API_URL))
+        .header("Content-Type", "application/x-www-form-urlencoded")
+        .body(format!(
+            "client_id={}&grant_type=authorization_code&code={}&code_verifier={}",
+            urlencoding::encode(client_id),
+            urlencoding::encode(code),
+            urlencoding::encode(code_verifier),
+        ))
+        .send()
+        .await?;
+
+    if !response.status().is_success() {
+        let error: WorkOSError = response.json().await?;
+        return Err(AuthError::Api(format!(
+            "{}: {}",
+            error.error,
+            error.error_description.unwrap_or_default()
+        )));
+    }
+
+    let token_response: TokenResponse = response.json().await?;
+    Ok(token_response)
+}
+
+/// Run the complete desktop OAuth login flow
+///
+/// This is a convenience function that starts the flow, opens the browser,
+/// waits for completion, and returns the result.
+pub async fn desktop_login() -> Result<TokenResponse, AuthError> {
+    let mut flow = DesktopOAuthFlow::new();
+
+    // Start the flow
+    flow.start().await?;
+
+    // Get the auth URL
+    let auth_url = flow.get_auth_url().ok_or(AuthError::OAuthNotStarted)?;
+    tracing::info!("Opening browser for authentication...");
+
+    // Open the browser
+    open_browser(auth_url)?;
+
+    // Wait for completion
+    flow.complete().await
+}
+
+/// Open a URL in the default browser
+fn open_browser(url: &str) -> Result<(), AuthError> {
+    #[cfg(target_os = "macos")]
+    {
+        std::process::Command::new("open")
+            .arg(url)
+            .spawn()
+            .map_err(|e| AuthError::Api(format!("Failed to open browser: {}", e)))?;
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        std::process::Command::new("xdg-open")
+            .arg(url)
+            .spawn()
+            .map_err(|e| AuthError::Api(format!("Failed to open browser: {}", e)))?;
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        std::process::Command::new("cmd")
+            .args(["/c", "start", url])
+            .spawn()
+            .map_err(|e| AuthError::Api(format!("Failed to open browser: {}", e)))?;
+    }
+
+    Ok(())
 }

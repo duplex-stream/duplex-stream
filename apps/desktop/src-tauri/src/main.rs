@@ -8,8 +8,10 @@ use std::time::Duration;
 mod auth;
 mod config;
 mod db;
+mod oauth;
 mod parsers;
 mod sync;
+mod token_manager;
 mod watcher;
 
 #[derive(Parser)]
@@ -101,6 +103,17 @@ fn run_desktop_app() {
 
     tracing::info!("Starting Duplex Stream desktop app");
 
+    // Initialize secure token storage and migrate legacy tokens
+    let token_storage = config::SecureTokenStorage::new();
+    match token_storage.migrate_from_legacy() {
+        Ok(true) => tracing::info!("Migrated legacy token to keyring"),
+        Ok(false) => tracing::debug!("No legacy token to migrate"),
+        Err(e) => tracing::warn!("Failed to migrate legacy token: {}", e),
+    }
+
+    // Create token manager
+    let token_manager = token_manager::create_shared_manager();
+
     // Load configuration
     let app_config = match config::load_config() {
         Ok(c) => c,
@@ -137,14 +150,23 @@ fn run_desktop_app() {
     let api_url = std::env::var("DUPLEX_API_URL")
         .unwrap_or_else(|_| "http://localhost:8787".to_string());
 
-    // Try to load access token from credentials, fall back to env var
-    let access_token = config::get_access_token()
-        .ok()
+    // Try to load access token from keyring, fall back to env var
+    let access_token = token_manager.get_access_token()
+        .or_else(|| config::get_access_token().ok())
         .or_else(|| std::env::var("DUPLEX_ACCESS_TOKEN").ok());
 
     if access_token.is_none() {
-        tracing::warn!("No authentication credentials found. Run 'duplex auth login' to authenticate.");
+        tracing::warn!("No authentication credentials found. Sign in via the menu bar.");
     }
+
+    // Start background token refresh
+    let token_manager_for_refresh = token_manager.clone();
+    let _refresh_handle = {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        rt.block_on(async {
+            token_manager_for_refresh.start_background_refresh()
+        })
+    };
 
     let sync_engine = match sync::create_shared_engine(api_url, access_token, registry.clone()) {
         Ok(e) => e,
@@ -225,13 +247,12 @@ fn run_desktop_app() {
                 }
             }
 
-            // Handle deep link events
-            let app_handle = app.handle().clone();
+            // Handle deep link events (keeping for future use, but not for auth tokens)
             app.listen("deep-link://new-url", move |event| {
                 let payload = event.payload();
                 tracing::info!("Received deep link payload: {:?}", payload);
 
-                // Payload is a JSON array of URLs, e.g., ["duplex://auth/callback?token=..."]
+                // Payload is a JSON array of URLs
                 let urls: Vec<String> = match serde_json::from_str(payload) {
                     Ok(urls) => urls,
                     Err(e) => {
@@ -243,20 +264,10 @@ fn run_desktop_app() {
                 for url_str in urls {
                     tracing::info!("Processing deep link URL: {}", url_str);
                     if let Ok(url) = url::Url::parse(&url_str) {
-                        if url.scheme() == "duplex" && url.host_str() == Some("auth") {
-                            // Extract token from query params
-                            if let Some(token) = url.query_pairs().find(|(k, _)| k == "token").map(|(_, v)| v.to_string()) {
-                                tracing::info!("Received auth token from deep link");
-                                // Store the token in keyring
-                                if let Err(e) = store_token_in_keyring(&token) {
-                                    tracing::error!("Failed to store token in keyring: {}", e);
-                                } else {
-                                    tracing::info!("Token stored successfully");
-                                    // Emit event to trigger menu refresh
-                                    let _ = app_handle.emit("auth-state-changed", true);
-                                }
-                            }
-                        }
+                        // Handle other deep links here if needed
+                        // Auth is now handled via PKCE loopback server
+                        tracing::debug!("Deep link received: scheme={}, host={:?}, path={}",
+                            url.scheme(), url.host_str(), url.path());
                     }
                 }
             });
@@ -271,11 +282,12 @@ fn run_desktop_app() {
                 .show_menu_on_left_click(true)
                 .on_menu_event(move |app, event| match event.id.as_ref() {
                     "auth_action" => {
-                        // Check current auth state
-                        if get_token_from_keyring().is_some() {
+                        // Check current auth state using keyring
+                        let storage = config::SecureTokenStorage::new();
+                        if storage.has_tokens() {
                             // Sign out
                             tracing::info!("Signing out...");
-                            if let Err(e) = clear_keyring_token() {
+                            if let Err(e) = storage.clear_tokens() {
                                 tracing::error!("Failed to sign out: {}", e);
                             } else {
                                 tracing::info!("Signed out successfully");
@@ -283,11 +295,27 @@ fn run_desktop_app() {
                                 let _ = app.emit("auth-state-changed", false);
                             }
                         } else {
-                            // Sign in - open browser
-                            tracing::info!("Opening browser for sign in...");
-                            if let Err(e) = open_auth_browser() {
-                                tracing::error!("Failed to open browser: {}", e);
-                            }
+                            // Sign in using PKCE OAuth flow
+                            tracing::info!("Starting OAuth sign in flow...");
+                            let app_handle = app.clone();
+                            std::thread::spawn(move || {
+                                let rt = tokio::runtime::Runtime::new().unwrap();
+                                rt.block_on(async {
+                                    match auth::desktop_login().await {
+                                        Ok(token) => {
+                                            tracing::info!(
+                                                "Sign in successful for {}",
+                                                token.user.email.as_deref().unwrap_or(&token.user.id)
+                                            );
+                                            // Emit event to trigger menu refresh
+                                            let _ = app_handle.emit("auth-state-changed", true);
+                                        }
+                                        Err(e) => {
+                                            tracing::error!("Sign in failed: {}", e);
+                                        }
+                                    }
+                                });
+                            });
                         }
                     }
                     "sync_now" => {
@@ -338,7 +366,8 @@ fn run_desktop_app() {
 
                     // Rebuild the menu with new auth state
                     if let Some(tray) = app_handle.tray_by_id(&tray_id) {
-                        let is_authenticated = get_token_from_keyring().is_some();
+                        let storage = config::SecureTokenStorage::new();
+                        let is_authenticated = storage.has_tokens();
                         tracing::info!("is_authenticated = {}", is_authenticated);
 
                         // Update menu items
@@ -368,88 +397,6 @@ fn run_desktop_app() {
         })
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
-}
-
-/// Get the token file path
-fn get_token_path() -> Result<std::path::PathBuf, Box<dyn std::error::Error>> {
-    let config_dir = dirs::config_dir()
-        .ok_or("Could not find config directory")?
-        .join("duplex-stream");
-    std::fs::create_dir_all(&config_dir)?;
-    Ok(config_dir.join(".token"))
-}
-
-/// Store access token to file
-fn store_token_in_keyring(token: &str) -> Result<(), Box<dyn std::error::Error>> {
-    let path = get_token_path()?;
-    tracing::info!("Storing token to {:?} (length: {})", path, token.len());
-    std::fs::write(&path, token)?;
-    // Verify it was stored
-    let stored = std::fs::read_to_string(&path)?;
-    tracing::info!("Verified token stored (length: {})", stored.len());
-    Ok(())
-}
-
-/// Get access token from file
-fn get_token_from_keyring() -> Option<String> {
-    let path = get_token_path().ok()?;
-    match std::fs::read_to_string(&path) {
-        Ok(token) if !token.is_empty() => {
-            tracing::debug!("Retrieved token from file (length: {})", token.len());
-            Some(token)
-        }
-        Ok(_) => {
-            tracing::debug!("Token file is empty");
-            None
-        }
-        Err(e) => {
-            tracing::debug!("No token file: {:?}", e);
-            None
-        }
-    }
-}
-
-/// Clear token file
-fn clear_keyring_token() -> Result<(), Box<dyn std::error::Error>> {
-    let path = get_token_path()?;
-    if path.exists() {
-        std::fs::remove_file(&path)?;
-    }
-    Ok(())
-}
-
-/// Open browser for web authentication
-fn open_auth_browser() -> Result<(), Box<dyn std::error::Error>> {
-    let default_url = if cfg!(debug_assertions) {
-        "http://localhost:5173"
-    } else {
-        "https://app.duplex.stream"
-    };
-    let auth_url = std::env::var("DUPLEX_WEB_URL").unwrap_or_else(|_| default_url.to_string());
-    let full_url = format!("{}/auth/desktop", auth_url);
-
-    #[cfg(target_os = "macos")]
-    {
-        std::process::Command::new("open")
-            .arg(&full_url)
-            .spawn()?;
-    }
-
-    #[cfg(target_os = "linux")]
-    {
-        std::process::Command::new("xdg-open")
-            .arg(&full_url)
-            .spawn()?;
-    }
-
-    #[cfg(target_os = "windows")]
-    {
-        std::process::Command::new("cmd")
-            .args(["/c", "start", &full_url])
-            .spawn()?;
-    }
-
-    Ok(())
 }
 
 fn open_config_in_editor() -> Result<(), Box<dyn std::error::Error>> {
@@ -485,7 +432,8 @@ fn open_config_in_editor() -> Result<(), Box<dyn std::error::Error>> {
 fn build_tray_menu(app: &tauri::App, watch_count: usize) -> Result<tauri::menu::Menu<tauri::Wry>, Box<dyn std::error::Error>> {
     use tauri::menu::{Menu, MenuItem};
 
-    let is_authenticated = get_token_from_keyring().is_some();
+    let storage = config::SecureTokenStorage::new();
+    let is_authenticated = storage.has_tokens();
 
     let status_text = format!(
         "Watching {} project{}",

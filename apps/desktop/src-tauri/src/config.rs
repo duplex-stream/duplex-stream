@@ -1,7 +1,16 @@
+use keyring::Entry;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 use thiserror::Error;
+
+/// Service name for keyring storage
+const KEYRING_SERVICE: &str = "app.duplex.desktop";
+
+/// Keyring entry names
+const KEYRING_ACCESS_TOKEN: &str = "access_token";
+const KEYRING_REFRESH_TOKEN: &str = "refresh_token";
+const KEYRING_EXPIRES_AT: &str = "expires_at";
 
 #[derive(Error, Debug)]
 pub enum ConfigError {
@@ -15,6 +24,8 @@ pub enum ConfigError {
     NotAuthenticated,
     #[error("Token expired")]
     TokenExpired,
+    #[error("Keyring error: {0}")]
+    Keyring(String),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -275,4 +286,164 @@ pub fn get_access_token() -> Result<String, ConfigError> {
     }
 
     Err(ConfigError::NotAuthenticated)
+}
+
+/// Token data stored in keyring
+#[derive(Debug, Clone)]
+pub struct TokenData {
+    pub access_token: String,
+    pub refresh_token: String,
+    pub expires_at: u64,
+}
+
+/// Secure token storage using the OS keyring
+#[derive(Debug, Clone)]
+pub struct SecureTokenStorage {
+    service: String,
+}
+
+impl SecureTokenStorage {
+    /// Create a new SecureTokenStorage instance
+    pub fn new() -> Self {
+        Self {
+            service: KEYRING_SERVICE.to_string(),
+        }
+    }
+
+    /// Store tokens in the keyring
+    pub fn store_tokens(
+        &self,
+        access_token: String,
+        refresh_token: String,
+        expires_at: u64,
+    ) -> Result<(), ConfigError> {
+        // Store access token
+        let entry = Entry::new(&self.service, KEYRING_ACCESS_TOKEN)
+            .map_err(|e| ConfigError::Keyring(e.to_string()))?;
+        entry.set_password(&access_token)
+            .map_err(|e| ConfigError::Keyring(e.to_string()))?;
+
+        // Store refresh token
+        let entry = Entry::new(&self.service, KEYRING_REFRESH_TOKEN)
+            .map_err(|e| ConfigError::Keyring(e.to_string()))?;
+        entry.set_password(&refresh_token)
+            .map_err(|e| ConfigError::Keyring(e.to_string()))?;
+
+        // Store expires_at as string
+        let entry = Entry::new(&self.service, KEYRING_EXPIRES_AT)
+            .map_err(|e| ConfigError::Keyring(e.to_string()))?;
+        entry.set_password(&expires_at.to_string())
+            .map_err(|e| ConfigError::Keyring(e.to_string()))?;
+
+        tracing::info!("Stored tokens in keyring");
+        Ok(())
+    }
+
+    /// Get tokens from the keyring
+    pub fn get_tokens(&self) -> Result<TokenData, ConfigError> {
+        // Get access token
+        let entry = Entry::new(&self.service, KEYRING_ACCESS_TOKEN)
+            .map_err(|e| ConfigError::Keyring(e.to_string()))?;
+        let access_token = entry.get_password()
+            .map_err(|_| ConfigError::NotAuthenticated)?;
+
+        // Get refresh token
+        let entry = Entry::new(&self.service, KEYRING_REFRESH_TOKEN)
+            .map_err(|e| ConfigError::Keyring(e.to_string()))?;
+        let refresh_token = entry.get_password()
+            .map_err(|_| ConfigError::NotAuthenticated)?;
+
+        // Get expires_at
+        let entry = Entry::new(&self.service, KEYRING_EXPIRES_AT)
+            .map_err(|e| ConfigError::Keyring(e.to_string()))?;
+        let expires_at_str = entry.get_password()
+            .map_err(|_| ConfigError::NotAuthenticated)?;
+        let expires_at: u64 = expires_at_str
+            .parse()
+            .map_err(|_| ConfigError::Keyring("Invalid expires_at value".to_string()))?;
+
+        tracing::debug!("Retrieved tokens from keyring");
+        Ok(TokenData {
+            access_token,
+            refresh_token,
+            expires_at,
+        })
+    }
+
+    /// Clear all tokens from the keyring
+    pub fn clear_tokens(&self) -> Result<(), ConfigError> {
+        // Delete access token
+        if let Ok(entry) = Entry::new(&self.service, KEYRING_ACCESS_TOKEN) {
+            let _ = entry.delete_credential();
+        }
+
+        // Delete refresh token
+        if let Ok(entry) = Entry::new(&self.service, KEYRING_REFRESH_TOKEN) {
+            let _ = entry.delete_credential();
+        }
+
+        // Delete expires_at
+        if let Ok(entry) = Entry::new(&self.service, KEYRING_EXPIRES_AT) {
+            let _ = entry.delete_credential();
+        }
+
+        tracing::info!("Cleared tokens from keyring");
+        Ok(())
+    }
+
+    /// Check if tokens exist in keyring
+    pub fn has_tokens(&self) -> bool {
+        if let Ok(entry) = Entry::new(&self.service, KEYRING_ACCESS_TOKEN) {
+            entry.get_password().is_ok()
+        } else {
+            false
+        }
+    }
+
+    /// Migrate from legacy .token file to keyring
+    ///
+    /// This checks for a legacy token file and migrates it to keyring storage.
+    /// Note: Legacy tokens don't have refresh tokens or expiry, so they'll need
+    /// to be re-authenticated eventually.
+    pub fn migrate_from_legacy(&self) -> Result<bool, ConfigError> {
+        let legacy_path = get_token_file_path()?;
+
+        if !legacy_path.exists() {
+            return Ok(false);
+        }
+
+        let token = std::fs::read_to_string(&legacy_path)?;
+        let token = token.trim();
+
+        if token.is_empty() {
+            return Ok(false);
+        }
+
+        tracing::info!("Migrating legacy token from {:?}", legacy_path);
+
+        // Store in keyring with a far-future expiry (legacy tokens don't have expiry info)
+        // The token will be refreshed when used
+        let far_future = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs() + 3600; // 1 hour from now
+
+        self.store_tokens(
+            token.to_string(),
+            String::new(), // No refresh token from legacy flow
+            far_future,
+        )?;
+
+        // Delete the legacy file
+        std::fs::remove_file(&legacy_path)?;
+        tracing::info!("Deleted legacy token file");
+
+        Ok(true)
+    }
+}
+
+impl Default for SecureTokenStorage {
+    fn default() -> Self {
+        Self::new()
+    }
 }
