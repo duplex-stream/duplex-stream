@@ -10,7 +10,7 @@ interface ClaudeCodeEvent {
 
 export interface ParsedMessage {
 	index: number
-	role: 'user' | 'assistant' | 'system'
+	role: 'user' | 'assistant'
 	content: string
 	thinking?: string
 	timestamp?: Date

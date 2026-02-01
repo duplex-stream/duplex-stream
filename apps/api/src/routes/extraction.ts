@@ -71,6 +71,12 @@ app.post(
 		const content = 'content' in body && body.content ? body.content : null
 		const r2Key = 'r2Key' in body && body.r2Key ? body.r2Key : null
 
+		// Validate r2Key belongs to the authenticated user's organization
+		// This prevents unauthorized access to other organizations' conversation data
+		if (r2Key && !r2Key.startsWith(`conversations/${orgId}/`)) {
+			return c.json({ error: 'Invalid r2Key for organization' }, 403)
+		}
+
 		const instance = await c.env.EXTRACT_WORKFLOW.create({
 			params: { orgId, workspaceId, content, r2Key, sourcePath, source },
 		})
