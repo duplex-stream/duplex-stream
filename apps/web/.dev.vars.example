@@ -1,0 +1,11 @@
+# WorkOS Configuration
+WORKOS_CLIENT_ID=client_xxx
+WORKOS_API_KEY=sk_test_xxx
+WORKOS_REDIRECT_URI=http://localhost:5173/auth/callback
+
+# Session encryption (min 32 chars, generate with: openssl rand -base64 24)
+WORKOS_COOKIE_PASSWORD=your-32-character-secret-here!!!
+SESSION_SECRET=another-32-character-secret!!!!
+
+# API Configuration
+API_BASE_URL=http://localhost:8787

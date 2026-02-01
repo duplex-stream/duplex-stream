@@ -1,0 +1,16 @@
+{
+	"extends": "@repo/typescript-config/base.json",
+	"include": ["src/**/*", "vite.config.ts", "*.d.ts"],
+	"exclude": ["node_modules"],
+	"compilerOptions": {
+		"target": "es2022",
+		"lib": ["es2022", "DOM", "DOM.Iterable"],
+		"jsx": "react-jsx",
+		"module": "es2022",
+		"baseUrl": ".",
+		"paths": {
+			"~/*": ["./src/*"]
+		},
+		"types": ["vite/client"]
+	}
+}

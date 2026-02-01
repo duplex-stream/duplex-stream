@@ -1,0 +1,21 @@
+{
+	"$schema": "node_modules/wrangler/config-schema.json",
+	"name": "duplex-web",
+	"compatibility_date": "2025-01-15",
+	"compatibility_flags": ["nodejs_compat", "nodejs_compat_populate_process_env"],
+	"main": "@tanstack/react-start/server-entry",
+	"observability": {
+		"logs": {
+			"enabled": true
+		}
+	},
+	"vars": {
+		"ENVIRONMENT": "development",
+		"WORKOS_CLIENT_ID": "", // Set via wrangler secret or .dev.vars
+		"WORKOS_REDIRECT_URI": "http://localhost:5173/auth/callback"
+	}
+	// Secrets to set via wrangler:
+	// - WORKOS_API_KEY
+	// - WORKOS_COOKIE_PASSWORD (min 32 chars, use: openssl rand -base64 24)
+	// - SESSION_SECRET
+}
