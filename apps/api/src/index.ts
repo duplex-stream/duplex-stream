@@ -1,4 +1,5 @@
 import { Hono } from 'hono'
+import { cors } from 'hono/cors'
 import { drizzle } from 'drizzle-orm/d1'
 import * as schema from '@repo/db/schema'
 import type { HonoEnv } from './context'
@@ -8,6 +9,20 @@ import extractionRoutes from './routes/extraction'
 import workspacesRoutes from './routes/workspaces'
 
 const app = new Hono<HonoEnv>()
+
+// CORS middleware
+app.use('*', cors({
+	origin: (origin) => {
+		// Allow localhost with any port for development
+		if (origin?.startsWith('http://localhost:')) return origin
+		// Allow production domains
+		if (origin === 'https://app.duplex.stream') return origin
+		return null
+	},
+	allowMethods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+	allowHeaders: ['Content-Type', 'Authorization'],
+	credentials: true,
+}))
 
 // Middleware: Database setup (all routes)
 app.use('*', async (c, next) => {

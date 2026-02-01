@@ -12,7 +12,8 @@
 	"vars": {
 		"ENVIRONMENT": "development",
 		"WORKOS_CLIENT_ID": "", // Set via wrangler secret or .dev.vars
-		"WORKOS_REDIRECT_URI": "http://localhost:5173/auth/callback"
+		"WORKOS_REDIRECT_URI": "http://localhost:5173/auth/callback",
+		"API_BASE_URL": "http://localhost:8787"
 	}
 	// Secrets to set via wrangler:
 	// - WORKOS_API_KEY

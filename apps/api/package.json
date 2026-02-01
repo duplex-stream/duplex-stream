@@ -4,7 +4,7 @@
 	"private": true,
 	"type": "module",
 	"scripts": {
-		"dev": "run-wrangler-dev",
+		"dev": "run-wrangler-dev --port 8787",
 		"build": "run-wrangler-build",
 		"build:wrangler": "run-wrangler-build",
 		"deploy": "run-wrangler-deploy",
