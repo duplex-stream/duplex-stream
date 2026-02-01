@@ -217,20 +217,32 @@ fn run_desktop_app() {
             let app_handle = app.handle().clone();
             app.listen("deep-link://new-url", move |event| {
                 let payload = event.payload();
-                tracing::info!("Received deep link: {:?}", payload);
-                // Parse the URL to extract token
-                if let Ok(url) = url::Url::parse(payload) {
-                    if url.scheme() == "duplex" && url.host_str() == Some("auth") {
-                        // Extract token from query params
-                        if let Some(token) = url.query_pairs().find(|(k, _)| k == "token").map(|(_, v)| v.to_string()) {
-                            tracing::info!("Received auth token from deep link");
-                            // Store the token in keyring
-                            if let Err(e) = store_token_in_keyring(&token) {
-                                tracing::error!("Failed to store token in keyring: {}", e);
-                            } else {
-                                tracing::info!("Token stored successfully");
-                                // Emit event to trigger menu refresh
-                                let _ = app_handle.emit("auth-state-changed", true);
+                tracing::info!("Received deep link payload: {:?}", payload);
+
+                // Payload is a JSON array of URLs, e.g., ["duplex://auth/callback?token=..."]
+                let urls: Vec<String> = match serde_json::from_str(payload) {
+                    Ok(urls) => urls,
+                    Err(e) => {
+                        tracing::error!("Failed to parse deep link payload as JSON: {}", e);
+                        return;
+                    }
+                };
+
+                for url_str in urls {
+                    tracing::info!("Processing deep link URL: {}", url_str);
+                    if let Ok(url) = url::Url::parse(&url_str) {
+                        if url.scheme() == "duplex" && url.host_str() == Some("auth") {
+                            // Extract token from query params
+                            if let Some(token) = url.query_pairs().find(|(k, _)| k == "token").map(|(_, v)| v.to_string()) {
+                                tracing::info!("Received auth token from deep link");
+                                // Store the token in keyring
+                                if let Err(e) = store_token_in_keyring(&token) {
+                                    tracing::error!("Failed to store token in keyring: {}", e);
+                                } else {
+                                    tracing::info!("Token stored successfully");
+                                    // Emit event to trigger menu refresh
+                                    let _ = app_handle.emit("auth-state-changed", true);
+                                }
                             }
                         }
                     }
