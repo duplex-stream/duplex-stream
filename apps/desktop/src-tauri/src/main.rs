@@ -96,7 +96,7 @@ fn run_desktop_app() {
     use tauri::{
         menu::{Menu, MenuItem},
         tray::TrayIconBuilder,
-        Manager,
+        Emitter, Listener,
     };
 
     tracing::info!("Starting Duplex Stream desktop app");
@@ -218,7 +218,8 @@ fn run_desktop_app() {
                                     tracing::error!("Failed to store token in keyring: {}", e);
                                 } else {
                                     tracing::info!("Token stored successfully");
-                                    // TODO: Update tray menu to show authenticated status
+                                    // Emit event to trigger menu refresh
+                                    let _ = app_handle.emit("auth-state-changed", true);
                                 }
                             }
                         }
@@ -268,7 +269,8 @@ fn run_desktop_app() {
                                 tracing::error!("Failed to sign out: {}", e);
                             } else {
                                 tracing::info!("Signed out successfully");
-                                // TODO: Refresh menu
+                                // Emit event to trigger menu refresh
+                                let _ = app.emit("auth-state-changed", false);
                             }
                         } else {
                             // Sign in - open browser
