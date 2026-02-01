@@ -326,8 +326,12 @@ fn clear_keyring_token() -> Result<(), Box<dyn std::error::Error>> {
 
 /// Open browser for web authentication
 fn open_auth_browser() -> Result<(), Box<dyn std::error::Error>> {
-    let auth_url = std::env::var("DUPLEX_WEB_URL")
-        .unwrap_or_else(|_| "https://app.duplex.stream".to_string());
+    let default_url = if cfg!(debug_assertions) {
+        "http://localhost:5173"
+    } else {
+        "https://app.duplex.stream"
+    };
+    let auth_url = std::env::var("DUPLEX_WEB_URL").unwrap_or_else(|_| default_url.to_string());
     let full_url = format!("{}/auth/desktop", auth_url);
 
     #[cfg(target_os = "macos")]
