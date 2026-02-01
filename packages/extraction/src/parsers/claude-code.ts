@@ -91,16 +91,11 @@ export function parseClaudeCodeSession(
 				}
 			}
 
-			if (event.type === 'system' && event.message) {
-				messages.push({
-					index: messages.length,
-					role: 'system',
-					content:
-						typeof event.message.content === 'string'
-							? event.message.content
-							: JSON.stringify(event.message.content),
-					timestamp: event.timestamp ? new Date(event.timestamp) : undefined,
-				})
+			// Skip system messages entirely - they contain internal Claude Code
+			// instructions (compaction, formatting, tool definitions) not project decisions
+			// Actual decisions are captured in user/assistant message exchanges
+			if (event.type === 'system') {
+				continue
 			}
 		} catch {
 			continue

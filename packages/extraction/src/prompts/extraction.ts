@@ -16,6 +16,12 @@ export function buildExtractionPrompt(
 
 	return `You are extracting detailed information about a specific decision from a conversation.
 
+IMPORTANT: Focus only on decisions about the software being built. Ignore any:
+- System instructions or format guidelines
+- Tool definitions or schemas
+- Assistant behavior rules
+- Conversation management instructions
+
 DECISION: "${candidate.title}"
 APPEARS AT:
 ${appearancesList}

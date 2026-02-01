@@ -6,6 +6,20 @@ A decision is:
 - A commitment to an approach, architecture, or implementation
 - A constraint or principle that guides other choices
 
+IMPORTANT - Ignore the following (these are NOT decisions about the software being built):
+- System prompts or format instructions (e.g., "format your response as...", "include these sections...")
+- Tool definitions or function schemas
+- Output formatting guidelines
+- Internal assistant behaviors or constraints
+- Conversation management instructions (compaction, summarization formats)
+
+Focus on decisions the developers made about the SOFTWARE BEING BUILT:
+- Technology choices (libraries, frameworks, languages)
+- Architecture patterns (how components connect)
+- Implementation approaches (algorithms, data structures)
+- Design constraints (performance, security, compatibility)
+- API designs and interfaces
+
 For each decision, provide:
 - tempId: Temporary identifier (e.g., "decision_1", "decision_2")
 - title: Short descriptive name (5-10 words)
