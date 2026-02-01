@@ -7,12 +7,15 @@ export interface Env {
 	EXTRACT_WORKFLOW: Workflow
 	ANTHROPIC_API_KEY?: string // Optional when using AI Gateway provider tokens
 	ENVIRONMENT: string
+	WORKOS_CLIENT_ID: string // WorkOS client ID for JWT validation
 }
 
 export interface HonoEnv {
 	Bindings: Env
 	Variables: {
 		db: DrizzleD1Database<typeof schema>
+		userId: string
 		orgId: string
+		permissions: string[]
 	}
 }

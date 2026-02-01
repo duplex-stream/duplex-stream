@@ -4,11 +4,14 @@
 	"private": true,
 	"type": "module",
 	"scripts": {
-		"dev": "bun runx dev",
-		"build": "bun runx build",
-		"deploy": "bun runx deploy",
-		"check:types": "bun runx run-tsc",
-		"check:lint": "bun runx run-eslint"
+		"dev": "run-wrangler-dev",
+		"build": "run-wrangler-build",
+		"build:wrangler": "run-wrangler-build",
+		"deploy": "run-wrangler-deploy",
+		"check:types": "run-tsc",
+		"check:lint": "run-eslint",
+		"check:workers-types": "run-wrangler-types --check",
+		"fix:workers-types": "run-wrangler-types"
 	},
 	"dependencies": {
 		"@ai-sdk/anthropic": "^3.0.33",
@@ -19,6 +22,7 @@
 		"ai": "^6.0.65",
 		"drizzle-orm": "^0.38.0",
 		"hono": "4.6.20",
+		"jose": "^6.1.3",
 		"zod": "4.1.12"
 	},
 	"devDependencies": {

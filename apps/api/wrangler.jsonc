@@ -28,6 +28,7 @@
 		}
 	],
 	"vars": {
-		"ENVIRONMENT": "development"
+		"ENVIRONMENT": "development",
+		"WORKOS_CLIENT_ID": "" // Set via wrangler secret or in env-specific config
 	}
 }

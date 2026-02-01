@@ -1,3 +1,23 @@
+<duplex-stream>
+
+<title>Duplex Stream - Turn AI Conversations into Lasting Decisions</title>
+
+<project-info>
+- **Product Name**: Duplex Stream
+- **Domain**: duplex.stream (duplexstream.com redirects)
+- **Subdomains**: app.duplex.stream (web app), api.duplex.stream (API)
+- **Deep Link Scheme**: duplex:// (for desktop auth)
+- **Authentication**: WorkOS AuthKit
+</project-info>
+
+<apps>
+- `apps/api` - Backend API (Hono on Cloudflare Workers)
+- `apps/web` - Web app (TanStack Start on Cloudflare Workers)
+- `apps/desktop` - Desktop app (Tauri, menu bar app)
+</apps>
+
+</duplex-stream>
+
 <cloudflare-workers-monorepo>
 
 <title>Cloudflare Workers Monorepo Guidelines for Claude Code</title>
