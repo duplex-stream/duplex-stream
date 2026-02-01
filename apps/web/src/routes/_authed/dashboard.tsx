@@ -33,18 +33,23 @@ const fetchDecisions = createServerFn({ method: 'GET' })
 			return { decisions: [], total: 0, page: 1, pageSize: 10 }
 		}
 
-		const api = createApiClient(auth.accessToken)
-		const response = await api.getDecisions({
-			page: data.page,
-			pageSize: data.pageSize,
-			search: data.search,
-		})
+		try {
+			const api = createApiClient(auth.accessToken)
+			const response = await api.getDecisions({
+				page: data.page,
+				pageSize: data.pageSize,
+				search: data.search,
+			})
 
-		return {
-			decisions: response.data,
-			total: response.total,
-			page: response.page,
-			pageSize: response.pageSize,
+			return {
+				decisions: response.data,
+				total: response.total,
+				page: response.page,
+				pageSize: response.pageSize,
+			}
+		} catch (error) {
+			console.error('Failed to fetch decisions:', error)
+			return { decisions: [], total: 0, page: 1, pageSize: 10 }
 		}
 	})
 
