@@ -1,36 +1,47 @@
 import { Hono } from 'hono'
 import { zValidator } from '@hono/zod-validator'
 import { z } from 'zod'
-import { eq, and, or, like, desc } from 'drizzle-orm'
+import { eq, and, or, like, desc, count } from 'drizzle-orm'
 import * as schema from '@repo/db/schema'
 import type { HonoEnv } from '../context'
 
 const app = new Hono<HonoEnv>()
 
-// Search decisions
+// List/search decisions
 app.get(
 	'/',
 	zValidator(
 		'query',
 		z.object({
-			q: z.string().min(1),
+			q: z.string().optional(),
+			search: z.string().optional(),
 			workspaceId: z.string().optional(),
-			limit: z.coerce.number().optional().default(20),
+			page: z.coerce.number().optional().default(1),
+			pageSize: z.coerce.number().optional().default(20),
+			limit: z.coerce.number().optional(), // deprecated, use pageSize
 		})
 	),
 	async (c) => {
-		const { q, workspaceId, limit } = c.req.valid('query')
+		const { q, search, workspaceId, page, pageSize, limit } = c.req.valid('query')
 		const orgId = c.get('orgId')
 		const db = c.get('db')
 
-		const conditions = [
-			eq(schema.decisions.orgId, orgId),
-			or(
-				like(schema.decisions.title, `%${q}%`),
-				like(schema.decisions.summary, `%${q}%`),
-				like(schema.decisions.reasoning, `%${q}%`)
-			),
-		]
+		const searchTerm = q || search
+		const effectiveLimit = pageSize || limit || 20
+		const offset = (page - 1) * effectiveLimit
+
+		// Build conditions
+		const conditions = [eq(schema.decisions.orgId, orgId)]
+
+		if (searchTerm) {
+			conditions.push(
+				or(
+					like(schema.decisions.title, `%${searchTerm}%`),
+					like(schema.decisions.summary, `%${searchTerm}%`),
+					like(schema.decisions.reasoning, `%${searchTerm}%`)
+				)!
+			)
+		}
 
 		if (workspaceId) {
 			conditions.push(eq(schema.decisions.workspaceId, workspaceId))
@@ -44,10 +55,22 @@ app.get(
 				dependencies: true,
 			},
 			orderBy: [desc(schema.decisions.confidence)],
-			limit,
+			limit: effectiveLimit,
+			offset,
 		})
 
-		return c.json({ decisions })
+		// Count total for pagination
+		const totalCount = await db
+			.select({ count: count() })
+			.from(schema.decisions)
+			.where(and(...conditions))
+
+		return c.json({
+			data: decisions,
+			total: totalCount[0].count,
+			page,
+			pageSize: effectiveLimit,
+		})
 	}
 )
 
@@ -70,7 +93,7 @@ app.get('/:id', async (c) => {
 		return c.json({ error: 'Decision not found' }, 404)
 	}
 
-	return c.json({ decision })
+	return c.json(decision)
 })
 
 export default app
