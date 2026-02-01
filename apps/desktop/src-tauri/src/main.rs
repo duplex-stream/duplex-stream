@@ -304,10 +304,12 @@ fn run_desktop_app() {
                 // Rebuild the menu with new auth state
                 if let Some(tray) = app_handle.tray_by_id(&tray_id) {
                     let is_authenticated = get_token_from_keyring().is_some();
+                    tracing::info!("is_authenticated = {}", is_authenticated);
 
                     // Update menu items
                     let auth_status_text = if is_authenticated { "✓ Signed In" } else { "○ Not Signed In" };
                     let auth_action_text = if is_authenticated { "Sign Out" } else { "Sign In..." };
+                    tracing::info!("Setting menu: auth_status='{}', auth_action='{}'", auth_status_text, auth_action_text);
 
                     // Create new menu
                     if let Ok(menu) = Menu::with_items(&app_handle, &[
