@@ -159,14 +159,14 @@ fn run_desktop_app() {
         tracing::warn!("No authentication credentials found. Sign in via the menu bar.");
     }
 
-    // Start background token refresh
+    // Start background token refresh in a separate thread with persistent runtime
     let token_manager_for_refresh = token_manager.clone();
-    let _refresh_handle = {
+    std::thread::spawn(move || {
         let rt = tokio::runtime::Runtime::new().unwrap();
-        rt.block_on(async {
-            token_manager_for_refresh.start_background_refresh()
-        })
-    };
+        rt.block_on(async move {
+            let _ = token_manager_for_refresh.start_background_refresh().await;
+        });
+    });
 
     let sync_engine = match sync::create_shared_engine(api_url, access_token, registry.clone()) {
         Ok(e) => e,
