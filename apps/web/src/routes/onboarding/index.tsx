@@ -1,7 +1,21 @@
 import { createFileRoute, Link, useNavigate } from '@tanstack/react-router'
+import { createServerFn } from '@tanstack/react-start'
+import { getAuth } from '@workos/authkit-tanstack-react-start'
 import { useState } from 'react'
 import { Button } from '~/components/ui/button'
+import { createApiClient } from '~/lib/api'
 import '~/styles.css'
+
+const createWorkspace = createServerFn({ method: 'POST' })
+	.inputValidator((data: { name: string }) => data)
+	.handler(async ({ data }) => {
+		const auth = await getAuth()
+		if (!auth.user) {
+			throw new Error('Not authenticated')
+		}
+		const api = createApiClient(auth.accessToken)
+		return await api.createWorkspace(data.name)
+	})
 
 export const Route = createFileRoute('/onboarding/')({
 	component: OnboardingPage,
@@ -11,15 +25,22 @@ function OnboardingPage() {
 	const navigate = useNavigate()
 	const [workspaceName, setWorkspaceName] = useState('')
 	const [isSubmitting, setIsSubmitting] = useState(false)
+	const [error, setError] = useState<string | null>(null)
 
 	const handleSubmit = async (e: React.FormEvent) => {
 		e.preventDefault()
 		if (!workspaceName.trim()) return
 
 		setIsSubmitting(true)
-		// TODO: Create workspace via API
-		// For now, just navigate to dashboard
-		navigate({ to: '/dashboard' })
+		setError(null)
+
+		try {
+			await createWorkspace({ data: { name: workspaceName } })
+			navigate({ to: '/dashboard' })
+		} catch (err) {
+			setError(err instanceof Error ? err.message : 'Failed to create workspace')
+			setIsSubmitting(false)
+		}
 	}
 
 	return (
@@ -54,6 +75,10 @@ function OnboardingPage() {
 							stored.
 						</p>
 					</div>
+
+					{error && (
+						<p className="text-sm text-red-500">{error}</p>
+					)}
 
 					<Button type="submit" className="w-full" disabled={isSubmitting}>
 						{isSubmitting ? 'Creating...' : 'Create Workspace'}

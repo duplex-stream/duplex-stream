@@ -84,6 +84,13 @@ export class ApiClient {
 			body: JSON.stringify({ status: 'archived' }),
 		})
 	}
+
+	async createWorkspace(name: string): Promise<{ id: string; name: string }> {
+		return this.fetch('/workspaces', {
+			method: 'POST',
+			body: JSON.stringify({ name }),
+		})
+	}
 }
 
 export function createApiClient(accessToken: string): ApiClient {
