@@ -336,15 +336,42 @@ fn run_desktop_app() {
 
 /// Store access token in system keyring
 fn store_token_in_keyring(token: &str) -> Result<(), Box<dyn std::error::Error>> {
-    let entry = keyring::Entry::new("duplex-stream", "access_token")?;
-    entry.set_password(token)?;
+    tracing::info!("Attempting to store token in keyring (length: {})", token.len());
+    let entry = keyring::Entry::new("duplex-stream", "access_token")
+        .map_err(|e| {
+            tracing::error!("Failed to create keyring entry: {:?}", e);
+            e
+        })?;
+    entry.set_password(token).map_err(|e| {
+        tracing::error!("Failed to set password in keyring: {:?}", e);
+        e
+    })?;
+    // Verify it was stored
+    match entry.get_password() {
+        Ok(stored) => tracing::info!("Verified token stored (length: {})", stored.len()),
+        Err(e) => tracing::error!("Failed to verify stored token: {:?}", e),
+    }
     Ok(())
 }
 
 /// Get access token from keyring
 fn get_token_from_keyring() -> Option<String> {
-    let entry = keyring::Entry::new("duplex-stream", "access_token").ok()?;
-    entry.get_password().ok()
+    match keyring::Entry::new("duplex-stream", "access_token") {
+        Ok(entry) => match entry.get_password() {
+            Ok(password) => {
+                tracing::debug!("Retrieved token from keyring (length: {})", password.len());
+                Some(password)
+            }
+            Err(e) => {
+                tracing::debug!("No token in keyring: {:?}", e);
+                None
+            }
+        },
+        Err(e) => {
+            tracing::error!("Failed to create keyring entry for reading: {:?}", e);
+            None
+        }
+    }
 }
 
 /// Clear token from keyring
