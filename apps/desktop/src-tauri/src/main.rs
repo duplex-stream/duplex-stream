@@ -96,7 +96,7 @@ fn run_desktop_app() {
     use tauri::{
         menu::{Menu, MenuItem},
         tray::TrayIconBuilder,
-        Emitter, Listener,
+        Emitter, Listener, Manager,
     };
 
     tracing::info!("Starting Duplex Stream desktop app");
@@ -237,35 +237,11 @@ fn run_desktop_app() {
                 }
             });
 
-            // Check auth state for menu
-            let is_authenticated = get_token_from_keyring().is_some();
-
-            // Build the tray menu
-            let status_text = format!(
-                "Watching {} project{}",
-                watch_count,
-                if watch_count == 1 { "" } else { "s" }
-            );
-            let status = MenuItem::with_id(app, "status", &status_text, false, None::<&str>)?;
-            let auth_status = if is_authenticated {
-                MenuItem::with_id(app, "auth_status", "✓ Signed In", false, None::<&str>)?
-            } else {
-                MenuItem::with_id(app, "auth_status", "○ Not Signed In", false, None::<&str>)?
-            };
-            let auth_action = if is_authenticated {
-                MenuItem::with_id(app, "auth_action", "Sign Out", true, None::<&str>)?
-            } else {
-                MenuItem::with_id(app, "auth_action", "Sign In...", true, None::<&str>)?
-            };
-            let sync_now = MenuItem::with_id(app, "sync_now", "Sync Now", is_authenticated, None::<&str>)?;
-            let separator = MenuItem::with_id(app, "sep1", "---", false, None::<&str>)?;
-            let settings = MenuItem::with_id(app, "settings", "Settings...", true, None::<&str>)?;
-            let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
-
-            let menu = Menu::with_items(app, &[&status, &auth_status, &auth_action, &sync_now, &separator, &settings, &quit])?;
+            // Build initial menu
+            let menu = build_tray_menu(app, watch_count)?;
 
             // Create the tray icon
-            let _tray = TrayIconBuilder::new()
+            let tray = TrayIconBuilder::new()
                 .icon(app.default_window_icon().unwrap().clone())
                 .menu(&menu)
                 .show_menu_on_left_click(true)
@@ -307,6 +283,35 @@ fn run_desktop_app() {
                     _ => {}
                 })
                 .build(app)?;
+
+            // Listen for auth state changes to update menu
+            let tray_id = tray.id().clone();
+            let app_handle = app.handle().clone();
+            app.listen("auth-state-changed", move |_event| {
+                tracing::info!("Auth state changed, updating menu...");
+                // Rebuild the menu with new auth state
+                if let Some(tray) = app_handle.tray_by_id(&tray_id) {
+                    let is_authenticated = get_token_from_keyring().is_some();
+
+                    // Update menu items
+                    let auth_status_text = if is_authenticated { "✓ Signed In" } else { "○ Not Signed In" };
+                    let auth_action_text = if is_authenticated { "Sign Out" } else { "Sign In..." };
+
+                    // Create new menu
+                    if let Ok(menu) = Menu::with_items(&app_handle, &[
+                        &MenuItem::with_id(&app_handle, "status", format!("Watching {} project(s)", watch_count), false, None::<&str>).unwrap(),
+                        &MenuItem::with_id(&app_handle, "auth_status", auth_status_text, false, None::<&str>).unwrap(),
+                        &MenuItem::with_id(&app_handle, "auth_action", auth_action_text, true, None::<&str>).unwrap(),
+                        &MenuItem::with_id(&app_handle, "sync_now", "Sync Now", is_authenticated, None::<&str>).unwrap(),
+                        &MenuItem::with_id(&app_handle, "sep1", "---", false, None::<&str>).unwrap(),
+                        &MenuItem::with_id(&app_handle, "settings", "Settings...", true, None::<&str>).unwrap(),
+                        &MenuItem::with_id(&app_handle, "quit", "Quit", true, None::<&str>).unwrap(),
+                    ]) {
+                        let _ = tray.set_menu(Some(menu));
+                        tracing::info!("Menu updated successfully");
+                    }
+                }
+            });
 
             tracing::info!("System tray initialized, watching {} directories", watch_count);
             Ok(())
@@ -396,4 +401,34 @@ fn open_config_in_editor() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     Ok(())
+}
+
+/// Build the tray menu based on current auth state
+fn build_tray_menu(app: &tauri::App, watch_count: usize) -> Result<tauri::menu::Menu<tauri::Wry>, Box<dyn std::error::Error>> {
+    use tauri::menu::{Menu, MenuItem};
+
+    let is_authenticated = get_token_from_keyring().is_some();
+
+    let status_text = format!(
+        "Watching {} project{}",
+        watch_count,
+        if watch_count == 1 { "" } else { "s" }
+    );
+    let status = MenuItem::with_id(app, "status", &status_text, false, None::<&str>)?;
+    let auth_status = if is_authenticated {
+        MenuItem::with_id(app, "auth_status", "✓ Signed In", false, None::<&str>)?
+    } else {
+        MenuItem::with_id(app, "auth_status", "○ Not Signed In", false, None::<&str>)?
+    };
+    let auth_action = if is_authenticated {
+        MenuItem::with_id(app, "auth_action", "Sign Out", true, None::<&str>)?
+    } else {
+        MenuItem::with_id(app, "auth_action", "Sign In...", true, None::<&str>)?
+    };
+    let sync_now = MenuItem::with_id(app, "sync_now", "Sync Now", is_authenticated, None::<&str>)?;
+    let separator = MenuItem::with_id(app, "sep1", "---", false, None::<&str>)?;
+    let settings = MenuItem::with_id(app, "settings", "Settings...", true, None::<&str>)?;
+    let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
+
+    Ok(Menu::with_items(app, &[&status, &auth_status, &auth_action, &sync_now, &separator, &settings, &quit])?)
 }
