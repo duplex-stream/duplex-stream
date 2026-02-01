@@ -202,6 +202,17 @@ fn run_desktop_app() {
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_deep_link::init())
         .setup(move |app| {
+            // Register deep-link scheme (needed for dev mode)
+            #[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
+            {
+                use tauri_plugin_deep_link::DeepLinkExt;
+                if let Err(e) = app.deep_link().register("duplex") {
+                    tracing::error!("Failed to register deep-link: {}", e);
+                } else {
+                    tracing::info!("Registered duplex:// URL scheme");
+                }
+            }
+
             // Handle deep link events
             let app_handle = app.handle().clone();
             app.listen("deep-link://new-url", move |event| {
