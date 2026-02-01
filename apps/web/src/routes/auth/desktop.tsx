@@ -1,9 +1,18 @@
 import { createFileRoute, redirect } from '@tanstack/react-router'
-import { getSignInUrl } from '@workos/authkit-tanstack-react-start'
+import { getAuth, getSignInUrl } from '@workos/authkit-tanstack-react-start'
 
 export const Route = createFileRoute('/auth/desktop')({
 	loader: async () => {
-		// Use state parameter to indicate desktop flow
+		// Check if user is already authenticated
+		const auth = await getAuth()
+
+		if (auth.user && auth.accessToken) {
+			// Already logged in - redirect directly to desktop app with token
+			const callbackUrl = `duplex://auth/callback?token=${encodeURIComponent(auth.accessToken)}`
+			throw redirect({ href: callbackUrl })
+		}
+
+		// Not logged in - redirect to WorkOS with desktop state
 		const signInUrl = await getSignInUrl({ state: 'desktop=true' })
 		throw redirect({ href: signInUrl })
 	},
