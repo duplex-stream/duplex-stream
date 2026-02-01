@@ -1,7 +1,10 @@
+import { getAuth } from '@workos/authkit-tanstack-react-start'
 import { createFileRoute, Link } from '@tanstack/react-router'
 import { createServerFn } from '@tanstack/react-start'
 import { Search } from 'lucide-react'
 import { useState } from 'react'
+
+import { createApiClient } from '~/lib/api'
 import { Button } from '~/components/ui/button'
 
 interface Decision {
@@ -25,43 +28,24 @@ const fetchDecisions = createServerFn({ method: 'GET' })
 		(data: { page?: number; pageSize?: number; search?: string }) => data,
 	)
 	.handler(async ({ data }) => {
-		// TODO: Call the actual API with auth token
-		// For now, return mock data
-		const mockDecisions: Decision[] = [
-			{
-				id: '1',
-				title: 'Use TypeScript for all new projects',
-				summary:
-					'Agreed to standardize on TypeScript for improved type safety and developer experience.',
-				status: 'active',
-				createdAt: '2025-01-15T10:00:00Z',
-				updatedAt: '2025-01-15T10:00:00Z',
-			},
-			{
-				id: '2',
-				title: 'Implement dark mode with CSS variables',
-				summary:
-					'Decided to use CSS custom properties for theming to support dark mode.',
-				status: 'active',
-				createdAt: '2025-01-14T15:30:00Z',
-				updatedAt: '2025-01-14T15:30:00Z',
-			},
-		]
+		const auth = await getAuth()
+		if (!auth.user) {
+			return { decisions: [], total: 0, page: 1, pageSize: 10 }
+		}
 
-		const filtered = data.search
-			? mockDecisions.filter(
-					(d) =>
-						d.title.toLowerCase().includes(data.search!.toLowerCase()) ||
-						d.summary.toLowerCase().includes(data.search!.toLowerCase()),
-				)
-			: mockDecisions
+		const api = createApiClient(auth.accessToken)
+		const response = await api.getDecisions({
+			page: data.page,
+			pageSize: data.pageSize,
+			search: data.search,
+		})
 
 		return {
-			decisions: filtered,
-			total: filtered.length,
-			page: data.page || 1,
-			pageSize: data.pageSize || 10,
-		} as DecisionsResponse
+			decisions: response.data,
+			total: response.total,
+			page: response.page,
+			pageSize: response.pageSize,
+		}
 	})
 
 export const Route = createFileRoute('/_authed/dashboard')({
