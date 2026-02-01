@@ -205,22 +205,21 @@ fn run_desktop_app() {
             // Handle deep link events
             let app_handle = app.handle().clone();
             app.listen("deep-link://new-url", move |event| {
-                if let Some(urls) = event.payload().as_ref() {
-                    tracing::info!("Received deep link: {:?}", urls);
-                    // Parse the URL to extract token
-                    if let Ok(url) = url::Url::parse(urls) {
-                        if url.scheme() == "duplex" && url.host_str() == Some("auth") {
-                            // Extract token from query params
-                            if let Some(token) = url.query_pairs().find(|(k, _)| k == "token").map(|(_, v)| v.to_string()) {
-                                tracing::info!("Received auth token from deep link");
-                                // Store the token in keyring
-                                if let Err(e) = store_token_in_keyring(&token) {
-                                    tracing::error!("Failed to store token in keyring: {}", e);
-                                } else {
-                                    tracing::info!("Token stored successfully");
-                                    // Emit event to trigger menu refresh
-                                    let _ = app_handle.emit("auth-state-changed", true);
-                                }
+                let payload = event.payload();
+                tracing::info!("Received deep link: {:?}", payload);
+                // Parse the URL to extract token
+                if let Ok(url) = url::Url::parse(payload) {
+                    if url.scheme() == "duplex" && url.host_str() == Some("auth") {
+                        // Extract token from query params
+                        if let Some(token) = url.query_pairs().find(|(k, _)| k == "token").map(|(_, v)| v.to_string()) {
+                            tracing::info!("Received auth token from deep link");
+                            // Store the token in keyring
+                            if let Err(e) = store_token_in_keyring(&token) {
+                                tracing::error!("Failed to store token in keyring: {}", e);
+                            } else {
+                                tracing::info!("Token stored successfully");
+                                // Emit event to trigger menu refresh
+                                let _ = app_handle.emit("auth-state-changed", true);
                             }
                         }
                     }
