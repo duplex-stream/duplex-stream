@@ -20,11 +20,15 @@ export type NewAlternative = InferInsertModel<typeof schema.alternatives>
 export type DecisionDependency = InferSelectModel<typeof schema.decisionDependencies>
 export type NewDecisionDependency = InferInsertModel<typeof schema.decisionDependencies>
 
+export type DecisionCorrection = InferSelectModel<typeof schema.decisionCorrections>
+export type NewDecisionCorrection = InferInsertModel<typeof schema.decisionCorrections>
+
 // Composite types for queries
 export type DecisionWithRelations = Decision & {
 	appearances: DecisionAppearance[]
 	alternatives: Alternative[]
 	dependencies: DecisionDependency[]
+	corrections: DecisionCorrection[]
 	conversation?: Conversation
 }
 

@@ -81,6 +81,22 @@ export const decisionDependencies = sqliteTable('decision_dependencies', {
 	toDecisionRef: text('to_decision_ref').notNull(),
 })
 
+// Decision corrections (human overrides of extracted values)
+export const decisionCorrections = sqliteTable('decision_corrections', {
+	id: text('id').primaryKey(),
+	decisionId: text('decision_id')
+		.notNull()
+		.references(() => decisions.id, { onDelete: 'cascade' }),
+	field: text('field', {
+		enum: ['title', 'summary', 'reasoning', 'status'],
+	}).notNull(),
+	previousValue: text('previous_value'),
+	newValue: text('new_value').notNull(),
+	correctedBy: text('corrected_by').notNull(), // participant ID
+	correctedAt: text('corrected_at').notNull(),
+	reason: text('reason'), // why the correction was made
+})
+
 // Relations
 export const conversationsRelations = relations(conversations, ({ many }) => ({
 	messages: many(messages),
@@ -102,6 +118,7 @@ export const decisionsRelations = relations(decisions, ({ one, many }) => ({
 	appearances: many(decisionAppearances),
 	alternatives: many(alternatives),
 	dependencies: many(decisionDependencies),
+	corrections: many(decisionCorrections),
 }))
 
 export const decisionAppearancesRelations = relations(
@@ -126,6 +143,16 @@ export const decisionDependenciesRelations = relations(
 	({ one }) => ({
 		fromDecision: one(decisions, {
 			fields: [decisionDependencies.fromDecisionId],
+			references: [decisions.id],
+		}),
+	})
+)
+
+export const decisionCorrectionsRelations = relations(
+	decisionCorrections,
+	({ one }) => ({
+		decision: one(decisions, {
+			fields: [decisionCorrections.decisionId],
 			references: [decisions.id],
 		}),
 	})
