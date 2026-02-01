@@ -158,6 +158,7 @@ fn run_desktop_app() {
     let file_watcher = Arc::new(Mutex::new(file_watcher));
     let file_watcher_clone = file_watcher.clone();
     let sync_engine_clone = sync_engine.clone();
+    let sync_engine_for_menu = sync_engine.clone();
 
     // Start background thread to handle file change events
     std::thread::spawn(move || {
@@ -202,6 +203,17 @@ fn run_desktop_app() {
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_deep_link::init())
         .setup(move |app| {
+            // Hide dock icon on macOS (menubar-only app)
+            #[cfg(target_os = "macos")]
+            {
+                use cocoa::appkit::{NSApp, NSApplication, NSApplicationActivationPolicy};
+                unsafe {
+                    let app = NSApp();
+                    app.setActivationPolicy_(NSApplicationActivationPolicy::NSApplicationActivationPolicyAccessory);
+                }
+                tracing::info!("Set app to accessory mode (no dock icon)");
+            }
+
             // Register deep-link scheme (needed for dev mode)
             #[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
             {
@@ -257,7 +269,7 @@ fn run_desktop_app() {
                 .icon(app.default_window_icon().unwrap().clone())
                 .menu(&menu)
                 .show_menu_on_left_click(true)
-                .on_menu_event(|app, event| match event.id.as_ref() {
+                .on_menu_event(move |app, event| match event.id.as_ref() {
                     "auth_action" => {
                         // Check current auth state
                         if get_token_from_keyring().is_some() {
@@ -280,7 +292,21 @@ fn run_desktop_app() {
                     }
                     "sync_now" => {
                         tracing::info!("Sync Now clicked");
-                        // TODO: Trigger sync
+                        let sync_engine = sync_engine_for_menu.clone();
+                        std::thread::spawn(move || {
+                            let rt = tokio::runtime::Runtime::new().unwrap();
+                            rt.block_on(async {
+                                let mut engine = sync_engine.lock().unwrap();
+                                match engine.process_all().await {
+                                    Ok(count) => {
+                                        tracing::info!("Sync completed: {} items processed", count);
+                                    }
+                                    Err(e) => {
+                                        tracing::error!("Sync failed: {}", e);
+                                    }
+                                }
+                            });
+                        });
                     }
                     "settings" => {
                         tracing::info!("Settings clicked");
@@ -301,30 +327,40 @@ fn run_desktop_app() {
             let app_handle = app.handle().clone();
             app.listen("auth-state-changed", move |_event| {
                 tracing::info!("Auth state changed, updating menu...");
-                // Rebuild the menu with new auth state
-                if let Some(tray) = app_handle.tray_by_id(&tray_id) {
-                    let is_authenticated = get_token_from_keyring().is_some();
-                    tracing::info!("is_authenticated = {}", is_authenticated);
 
-                    // Update menu items
-                    let auth_status_text = if is_authenticated { "✓ Signed In" } else { "○ Not Signed In" };
-                    let auth_action_text = if is_authenticated { "Sign Out" } else { "Sign In..." };
-                    tracing::info!("Setting menu: auth_status='{}', auth_action='{}'", auth_status_text, auth_action_text);
+                // Clone handles for the spawned thread
+                let app_handle = app_handle.clone();
+                let tray_id = tray_id.clone();
 
-                    // Create new menu
-                    if let Ok(menu) = Menu::with_items(&app_handle, &[
-                        &MenuItem::with_id(&app_handle, "status", format!("Watching {} project(s)", watch_count), false, None::<&str>).unwrap(),
-                        &MenuItem::with_id(&app_handle, "auth_status", auth_status_text, false, None::<&str>).unwrap(),
-                        &MenuItem::with_id(&app_handle, "auth_action", auth_action_text, true, None::<&str>).unwrap(),
-                        &MenuItem::with_id(&app_handle, "sync_now", "Sync Now", is_authenticated, None::<&str>).unwrap(),
-                        &MenuItem::with_id(&app_handle, "sep1", "---", false, None::<&str>).unwrap(),
-                        &MenuItem::with_id(&app_handle, "settings", "Settings...", true, None::<&str>).unwrap(),
-                        &MenuItem::with_id(&app_handle, "quit", "Quit", true, None::<&str>).unwrap(),
-                    ]) {
-                        let _ = tray.set_menu(Some(menu));
-                        tracing::info!("Menu updated successfully");
+                // Delay menu update to avoid interfering with current menu interaction
+                std::thread::spawn(move || {
+                    std::thread::sleep(Duration::from_millis(100));
+
+                    // Rebuild the menu with new auth state
+                    if let Some(tray) = app_handle.tray_by_id(&tray_id) {
+                        let is_authenticated = get_token_from_keyring().is_some();
+                        tracing::info!("is_authenticated = {}", is_authenticated);
+
+                        // Update menu items
+                        let auth_status_text = if is_authenticated { "✓ Signed In" } else { "○ Not Signed In" };
+                        let auth_action_text = if is_authenticated { "Sign Out" } else { "Sign In..." };
+                        tracing::info!("Setting menu: auth_status='{}', auth_action='{}'", auth_status_text, auth_action_text);
+
+                        // Create new menu
+                        if let Ok(menu) = Menu::with_items(&app_handle, &[
+                            &MenuItem::with_id(&app_handle, "status", format!("Watching {} project(s)", watch_count), false, None::<&str>).unwrap(),
+                            &MenuItem::with_id(&app_handle, "auth_status", auth_status_text, false, None::<&str>).unwrap(),
+                            &MenuItem::with_id(&app_handle, "auth_action", auth_action_text, true, None::<&str>).unwrap(),
+                            &MenuItem::with_id(&app_handle, "sync_now", "Sync Now", is_authenticated, None::<&str>).unwrap(),
+                            &MenuItem::with_id(&app_handle, "sep1", "---", false, None::<&str>).unwrap(),
+                            &MenuItem::with_id(&app_handle, "settings", "Settings...", true, None::<&str>).unwrap(),
+                            &MenuItem::with_id(&app_handle, "quit", "Quit", true, None::<&str>).unwrap(),
+                        ]) {
+                            let _ = tray.set_menu(Some(menu));
+                            tracing::info!("Menu updated successfully");
+                        }
                     }
-                }
+                });
             });
 
             tracing::info!("System tray initialized, watching {} directories", watch_count);

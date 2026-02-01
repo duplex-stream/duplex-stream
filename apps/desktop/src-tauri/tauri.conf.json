@@ -8,10 +8,6 @@
   },
   "app": {
     "withGlobalTauri": false,
-    "trayIcon": {
-      "iconPath": "icons/icon.png",
-      "iconAsTemplate": true
-    },
     "windows": []
   },
   "bundle": {
@@ -25,7 +21,8 @@
       "icons/icon.ico"
     ],
     "macOS": {
-      "minimumSystemVersion": "10.15"
+      "minimumSystemVersion": "10.15",
+      "infoPlist": "Info.plist"
     }
   },
   "plugins": {

@@ -44,10 +44,20 @@ export class ExtractConversationWorkflow extends WorkflowEntrypoint<
 	): Promise<ExtractConversationResult> {
 		const { orgId, workspaceId, content, sourcePath, source } = event.payload
 
-		// Create AI client - using direct Anthropic API for now
-		// TODO: Re-enable AI Gateway once auth is working
+		// Create AI client using Cloudflare AI Gateway
+		// The gateway proxies to Anthropic and provides caching/analytics
+		const gatewayUrl = `https://gateway.ai.cloudflare.com/v1/${this.env.CF_ACCOUNT_ID}/${this.env.AI_GATEWAY_NAME}/anthropic`
+
+		// Build headers - include gateway auth token if configured
+		const headers: Record<string, string> = {}
+		if (this.env.CF_AIG_TOKEN) {
+			headers['cf-aig-authorization'] = `Bearer ${this.env.CF_AIG_TOKEN}`
+		}
+
 		const client = createAnthropic({
-			apiKey: this.env.ANTHROPIC_API_KEY!,
+			apiKey: this.env.ANTHROPIC_API_KEY, // Anthropic API key passed through gateway
+			baseURL: gatewayUrl,
+			headers,
 		})
 
 		// Step 1: Parse content

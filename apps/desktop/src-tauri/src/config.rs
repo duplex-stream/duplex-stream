@@ -237,13 +237,42 @@ pub fn delete_credentials() -> Result<(), ConfigError> {
     Ok(())
 }
 
-/// Get a valid access token, checking expiry
-pub fn get_access_token() -> Result<String, ConfigError> {
-    let credentials = load_credentials()?;
+/// Get the simple token file path (used by desktop auth flow)
+fn get_token_file_path() -> Result<PathBuf, ConfigError> {
+    let config_dir = dirs::config_dir()
+        .ok_or(ConfigError::NoConfigDir)?
+        .join("duplex-stream");
+    Ok(config_dir.join(".token"))
+}
 
-    if credentials.is_expired() {
-        return Err(ConfigError::TokenExpired);
+/// Get a valid access token, checking multiple sources:
+/// 1. First try the credentials.json file (has expiry info)
+/// 2. Fall back to the simple .token file (from desktop auth flow)
+pub fn get_access_token() -> Result<String, ConfigError> {
+    // Try credentials.json first (has expiry checking)
+    match load_credentials() {
+        Ok(credentials) => {
+            if credentials.is_expired() {
+                tracing::debug!("Credentials expired, checking token file");
+            } else {
+                return Ok(credentials.access_token);
+            }
+        }
+        Err(e) => {
+            tracing::debug!("No credentials.json: {}, checking token file", e);
+        }
     }
 
-    Ok(credentials.access_token)
+    // Fall back to simple token file (from desktop auth)
+    let token_path = get_token_file_path()?;
+    if token_path.exists() {
+        let token = std::fs::read_to_string(&token_path)?;
+        let token = token.trim();
+        if !token.is_empty() {
+            tracing::debug!("Using token from file at {:?}", token_path);
+            return Ok(token.to_string());
+        }
+    }
+
+    Err(ConfigError::NotAuthenticated)
 }

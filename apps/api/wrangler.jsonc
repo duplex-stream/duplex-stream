@@ -29,6 +29,10 @@
 	],
 	"vars": {
 		"ENVIRONMENT": "development",
-		"WORKOS_CLIENT_ID": "" // Set via wrangler secret or in env-specific config
+		"WORKOS_CLIENT_ID": "", // Set via .dev.vars
+		"CF_ACCOUNT_ID": "", // Set via .dev.vars
+		"AI_GATEWAY_NAME": "duplex-extraction",
+		"CF_AIG_TOKEN": "" // Optional: AI Gateway auth token (if gateway requires auth)
 	}
+	// Required in .dev.vars: ANTHROPIC_API_KEY
 }

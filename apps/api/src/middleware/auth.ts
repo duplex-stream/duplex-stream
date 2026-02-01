@@ -56,7 +56,7 @@ export function authMiddleware(): MiddlewareHandler<HonoEnv> {
 			const jwks = getJWKS(clientId)
 			const { payload } = await jwtVerify(token, jwks, {
 				// WorkOS tokens are issued by the WorkOS API
-				issuer: 'https://api.workos.com/',
+				issuer: 'https://api.workos.com',
 			})
 
 			const claims = payload as AuthClaims
@@ -100,7 +100,7 @@ export function optionalAuthMiddleware(): MiddlewareHandler<HonoEnv> {
 		try {
 			const jwks = getJWKS(clientId)
 			const { payload } = await jwtVerify(token, jwks, {
-				issuer: 'https://api.workos.com/',
+				issuer: 'https://api.workos.com',
 			})
 
 			const claims = payload as AuthClaims

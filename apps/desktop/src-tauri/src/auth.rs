@@ -302,20 +302,40 @@ pub fn status() -> Result<(), AuthError> {
 }
 
 /// Get a valid access token, refreshing if needed
+/// First checks credentials.json, then falls back to simple .token file
 pub async fn get_valid_token() -> Result<String, AuthError> {
-    let credentials = crate::config::load_credentials()?;
+    // Try loading full credentials (has expiry/refresh capability)
+    match crate::config::load_credentials() {
+        Ok(credentials) => {
+            if !credentials.is_expired() {
+                return Ok(credentials.access_token);
+            }
 
-    if !credentials.is_expired() {
-        return Ok(credentials.access_token);
+            // Token expired, try to refresh
+            tracing::info!("Access token expired, refreshing...");
+            let client_id = get_client_id()?;
+            let token = refresh_token(&client_id, &credentials.refresh_token).await?;
+
+            // Save updated credentials
+            save_token_as_credentials(&token)?;
+
+            return Ok(token.access_token);
+        }
+        Err(crate::config::ConfigError::NotAuthenticated) => {
+            // No credentials.json, fall through to check token file
+        }
+        Err(e) => {
+            return Err(AuthError::Config(e));
+        }
     }
 
-    // Token expired, try to refresh
-    tracing::info!("Access token expired, refreshing...");
-    let client_id = get_client_id()?;
-    let token = refresh_token(&client_id, &credentials.refresh_token).await?;
-
-    // Save updated credentials
-    save_token_as_credentials(&token)?;
-
-    Ok(token.access_token)
+    // Fall back to simple token file (from desktop auth flow)
+    // This token doesn't have refresh capability, but it's better than nothing
+    match crate::config::get_access_token() {
+        Ok(token) => {
+            tracing::debug!("Using token from simple token file");
+            Ok(token)
+        }
+        Err(e) => Err(AuthError::Config(e)),
+    }
 }

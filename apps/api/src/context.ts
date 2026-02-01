@@ -5,9 +5,12 @@ export interface Env {
 	DB: D1Database
 	AI: Ai
 	EXTRACT_WORKFLOW: Workflow
-	ANTHROPIC_API_KEY?: string // Optional when using AI Gateway provider tokens
+	ANTHROPIC_API_KEY: string // Anthropic API key - required for API calls
 	ENVIRONMENT: string
 	WORKOS_CLIENT_ID: string // WorkOS client ID for JWT validation
+	CF_ACCOUNT_ID: string // Cloudflare account ID for AI Gateway
+	AI_GATEWAY_NAME: string // AI Gateway name for routing requests
+	CF_AIG_TOKEN?: string // Optional: AI Gateway auth token (for authenticated gateways)
 }
 
 export interface HonoEnv {

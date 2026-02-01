@@ -208,8 +208,7 @@ impl SyncEngine {
             "content": conversation.content,
             "sourcePath": conversation.source_path.to_string_lossy(),
             "source": conversation.source,
-            "sessionId": conversation.session_id,
-            "projectPath": conversation.project_path.as_ref().map(|p| p.to_string_lossy().to_string()),
+            "workspaceId": "default",
         }));
 
         // Add auth header if available (with auto-refresh)
