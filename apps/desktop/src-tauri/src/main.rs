@@ -334,50 +334,51 @@ fn run_desktop_app() {
         .expect("error while running tauri application");
 }
 
-/// Store access token in system keyring
+/// Get the token file path
+fn get_token_path() -> Result<std::path::PathBuf, Box<dyn std::error::Error>> {
+    let config_dir = dirs::config_dir()
+        .ok_or("Could not find config directory")?
+        .join("duplex-stream");
+    std::fs::create_dir_all(&config_dir)?;
+    Ok(config_dir.join(".token"))
+}
+
+/// Store access token to file
 fn store_token_in_keyring(token: &str) -> Result<(), Box<dyn std::error::Error>> {
-    tracing::info!("Attempting to store token in keyring (length: {})", token.len());
-    let entry = keyring::Entry::new("duplex-stream", "access_token")
-        .map_err(|e| {
-            tracing::error!("Failed to create keyring entry: {:?}", e);
-            e
-        })?;
-    entry.set_password(token).map_err(|e| {
-        tracing::error!("Failed to set password in keyring: {:?}", e);
-        e
-    })?;
+    let path = get_token_path()?;
+    tracing::info!("Storing token to {:?} (length: {})", path, token.len());
+    std::fs::write(&path, token)?;
     // Verify it was stored
-    match entry.get_password() {
-        Ok(stored) => tracing::info!("Verified token stored (length: {})", stored.len()),
-        Err(e) => tracing::error!("Failed to verify stored token: {:?}", e),
-    }
+    let stored = std::fs::read_to_string(&path)?;
+    tracing::info!("Verified token stored (length: {})", stored.len());
     Ok(())
 }
 
-/// Get access token from keyring
+/// Get access token from file
 fn get_token_from_keyring() -> Option<String> {
-    match keyring::Entry::new("duplex-stream", "access_token") {
-        Ok(entry) => match entry.get_password() {
-            Ok(password) => {
-                tracing::debug!("Retrieved token from keyring (length: {})", password.len());
-                Some(password)
-            }
-            Err(e) => {
-                tracing::debug!("No token in keyring: {:?}", e);
-                None
-            }
-        },
+    let path = get_token_path().ok()?;
+    match std::fs::read_to_string(&path) {
+        Ok(token) if !token.is_empty() => {
+            tracing::debug!("Retrieved token from file (length: {})", token.len());
+            Some(token)
+        }
+        Ok(_) => {
+            tracing::debug!("Token file is empty");
+            None
+        }
         Err(e) => {
-            tracing::error!("Failed to create keyring entry for reading: {:?}", e);
+            tracing::debug!("No token file: {:?}", e);
             None
         }
     }
 }
 
-/// Clear token from keyring
+/// Clear token file
 fn clear_keyring_token() -> Result<(), Box<dyn std::error::Error>> {
-    let entry = keyring::Entry::new("duplex-stream", "access_token")?;
-    entry.delete_credential()?;
+    let path = get_token_path()?;
+    if path.exists() {
+        std::fs::remove_file(&path)?;
+    }
     Ok(())
 }
 
